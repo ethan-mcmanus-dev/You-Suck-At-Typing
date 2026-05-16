@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(irm bun.sh/install.ps1 | iex)",
+      "PowerShell(claude --version)",
+      "PowerShell(Get-Command claude -ErrorAction SilentlyContinue)",
+      "PowerShell(npm list -g @anthropic-ai/claude-code --depth=0 2>$null)",
+      "PowerShell(npm list -g claude 2>$null)",
+      "PowerShell(npx claude --version 2>$null)",
+      "PowerShell(Get-ChildItem \"$env:LOCALAPPDATA\\\\AnthropicClaude\" -ErrorAction SilentlyContinue | Select-Object -First 5)",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Bash(git fetch *)",
+      "Bash(git checkout *)",
+      "Bash(grep -A 20 -i \"project\\\\|per-project\\\\|submodule\\\\|install\" ~/.claude/skills/gstack/README.md | head -60)",
+      "Read(//c/Users/ethan/.claude/skills/gstack/**)",
+      "Bash(export PATH=\"$HOME/.bun/bin:$PATH\")",
+      "Bash(./setup --team)",
+      "Bash(~/.claude/skills/gstack/bin/gstack-team-init required *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/check-gstack.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
