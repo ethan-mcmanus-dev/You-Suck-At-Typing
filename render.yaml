@@ -14,7 +14,7 @@ services:
       - key: SUPABASE_SERVICE_KEY
         sync: false
       - key: CORS_ORIGINS
-        value: https://yousuckattyping.vercel.app
+        value: http://localhost:3000
       - key: MODEL_ARTIFACT_PATH
         value: model_artifacts/clusters_v1.json
     healthCheckPath: /health
