@@ -11,6 +11,16 @@ const PASSAGES = [
   "How much wood would a woodchuck chuck if a woodchuck could chuck wood by the old pine forest.",
   "Pack my box with five dozen liquor jugs and send them to the warehouse before the storm arrives.",
   "We wandered through the narrow cobblestone streets of the old city as the evening light faded slowly.",
+  "Programming requires patience and precision, the ability to think through complex problems at length.",
+  "Jazz musicians improvise freely, blending rhythm and melody into something unique at every performance.",
+  "Every morning the baker rose before dawn to prepare fresh bread for the neighborhood market stalls.",
+  "The tall pine trees swayed gently in the summer breeze as the hikers rested by the clear stream.",
+  "Her fingers flew across the keyboard with practiced ease, barely touching the keys as she composed.",
+  "Science advances by questioning old assumptions, running experiments, and sharing results with peers.",
+  "The computer displayed an error that took three hours to debug before the team found the root cause.",
+  "Children learning to type often find that practice and repetition are the keys to building real speed.",
+  "From the front porch you could see the farm stretching out across rolling hills toward the horizon.",
+  "Around the rugged rocks the ragged rascal ran, repeating rhymes remarkably rapidly and relentlessly.",
 ];
 
 type Status = 'idle' | 'typing' | 'submitting' | 'error';

@@ -21,9 +21,9 @@ for _p in [os.path.join(_ROOT, "backend"), os.path.join(_ROOT, "ml")]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from features import KeystrokeEvent, compute_features
+from features import KeystrokeEvent, FeatureVector, compute_features
 from insights import compute_insights, Insight, InsightReport
-from api.db import get_client
+from api.db import get_client, get_device_features
 from api.models import (
     InsightOut,
     InsightReportOut,
@@ -85,6 +85,48 @@ def _insight_to_out(ins: Insight) -> InsightOut:
         user_value=round(ins.user_value, 2),
         cluster_mean=round(ins.cluster_mean, 2),
         message=ins.message,
+    )
+
+
+_CLUSTER_FIELDS = [
+    "mean_dwell_sfb", "mean_flight_sfb", "mean_flight_roll_in",
+    "mean_flight_roll_out", "mean_flight_alternation",
+    "mean_flight_scissor", "mean_flight_lateral",
+]
+
+
+def _aggregate_features(current: "FeatureVector", past_rows: list[dict]) -> tuple["FeatureVector", int]:
+    """Average current features with stored past rows. Returns (averaged_fv, n_sessions)."""
+    import statistics as _stat
+    collected: dict[str, list[float]] = {f: [] for f in _CLUSTER_FIELDS}
+    for row in past_rows:
+        for f in _CLUSTER_FIELDS:
+            val = row.get(f)
+            if val is not None:
+                collected[f].append(float(val))
+    for f in _CLUSTER_FIELDS:
+        val = getattr(current, f)
+        if val is not None:
+            collected[f].append(val)
+
+    def _m(vals: list[float]) -> "float | None":
+        return _stat.mean(vals) if vals else None
+
+    return (
+        FeatureVector(
+            mean_dwell_sfb=_m(collected["mean_dwell_sfb"]),
+            mean_flight_sfb=_m(collected["mean_flight_sfb"]),
+            mean_flight_roll_in=_m(collected["mean_flight_roll_in"]),
+            mean_flight_roll_out=_m(collected["mean_flight_roll_out"]),
+            mean_flight_alternation=_m(collected["mean_flight_alternation"]),
+            mean_flight_scissor=_m(collected["mean_flight_scissor"]),
+            mean_flight_lateral=_m(collected["mean_flight_lateral"]),
+            redirect_rate=current.redirect_rate,
+            rollover_rate=current.rollover_rate,
+            n_keystrokes=current.n_keystrokes,
+            n_bigrams_labeled=current.n_bigrams_labeled,
+        ),
+        len(past_rows) + 1,
     )
 
 
@@ -159,7 +201,7 @@ def create_session(body: SessionIn, background_tasks: BackgroundTasks):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    # Assign to cluster
+    # Assign to cluster for this session
     cluster_idx = assign_cluster(fv, state.model)
     if cluster_idx is None:
         raise HTTPException(
@@ -167,8 +209,13 @@ def create_session(body: SessionIn, background_tasks: BackgroundTasks):
             detail="Session has too few bigrams to assign a cluster. Type more varied text.",
         )
 
-    # Generate insights
+    # Generate insights from this session's features
     report = compute_insights(fv, state.model, cluster_idx)
+
+    # Average with past sessions for a stable cluster assignment
+    past_rows = get_device_features(str(body.participant_id))
+    avg_fv, n_sessions = _aggregate_features(fv, past_rows)
+    aggregated_cluster_idx = assign_cluster(avg_fv, state.model)
 
     # Generate a stable session ID
     import uuid
@@ -197,6 +244,8 @@ def create_session(body: SessionIn, background_tasks: BackgroundTasks):
             "n_bigrams_labeled": fv.n_bigrams_labeled,
         }),
         insights=_report_to_out(report),
+        n_sessions=n_sessions,
+        aggregated_cluster_idx=aggregated_cluster_idx,
     )
 
 
@@ -234,6 +283,22 @@ def get_session(session_id: str):
 
     f = features_row.data
     ins = insights_row.data
+    participant_id = session_row.data["participant_id"]
+
+    # Compute aggregated cluster from all sessions for this device
+    all_feature_rows = get_device_features(participant_id)
+    # Build a FeatureVector from the stored row (the current session is already in DB)
+    current_fv = FeatureVector(
+        **{field: f.get(field) for field in _CLUSTER_FIELDS},
+        redirect_rate=f.get("redirect_rate"),
+        rollover_rate=f.get("rollover_rate"),
+        n_keystrokes=f.get("n_keystrokes", 0),
+        n_bigrams_labeled=f.get("n_bigrams_labeled", 0),
+    )
+    # Exclude the current session from past_rows to avoid double-counting
+    other_rows = [r for r in all_feature_rows if r.get("session_id") != session_id]
+    avg_fv, n_sessions = _aggregate_features(current_fv, other_rows)
+    aggregated_cluster_idx = assign_cluster(avg_fv, state.model)
 
     def _row_to_insight(d: dict) -> InsightOut:
         return InsightOut(**d)
@@ -248,6 +313,8 @@ def get_session(session_id: str):
             secondary=[_row_to_insight(i) for i in (ins["secondary"] or [])],
             positives=[_row_to_insight(i) for i in (ins["positives"] or [])],
             cluster_idx=session_row.data["cluster_idx"] or 0,
-            n_features_observed=ins["n_features_observed"],
+            n_features_observed=ins.get("n_features_observed", 0),
         ),
+        n_sessions=n_sessions,
+        aggregated_cluster_idx=aggregated_cluster_idx,
     )

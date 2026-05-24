@@ -67,7 +67,9 @@ class InsightReportOut(BaseModel):
 
 class SessionOut(BaseModel):
     session_id: UUID
-    cluster_idx: int | None
+    cluster_idx: int | None          # this session alone
     cluster_version: int
     features: FeatureVectorOut
     insights: InsightReportOut
+    n_sessions: int = 1              # total sessions for this device
+    aggregated_cluster_idx: int | None = None  # cluster based on all sessions

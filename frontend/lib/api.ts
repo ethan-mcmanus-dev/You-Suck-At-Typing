@@ -29,6 +29,8 @@ export interface SessionResult {
   cluster_version: number;
   features: Record<string, number | null>;
   insights: InsightReport;
+  n_sessions: number;
+  aggregated_cluster_idx: number | null;
 }
 
 export async function submitSession(
