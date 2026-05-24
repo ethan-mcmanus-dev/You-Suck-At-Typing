@@ -110,7 +110,7 @@ def _aggregate_features(current: "FeatureVector", past_rows: list[dict]) -> tupl
             collected[f].append(val)
 
     def _m(vals: list[float]) -> "float | None":
-        return _stat.mean(vals) if vals else None
+        return _stat.median(vals) if vals else None
 
     return (
         FeatureVector(

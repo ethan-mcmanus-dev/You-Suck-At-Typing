@@ -10,15 +10,33 @@ import {
   SPEED_ORDER,
 } from '@/lib/clusters';
 
-const FEATURE_LABELS: Record<string, string> = {
-  mean_dwell_sfb: 'Same-finger dwell',
-  mean_flight_sfb: 'Same-finger transition',
-  mean_flight_roll_in: 'Inward roll',
-  mean_flight_roll_out: 'Outward roll',
-  mean_flight_alternation: 'Hand alternation',
-  mean_flight_scissor: 'Scissor (row jump)',
-  mean_flight_lateral: 'Pinky reach',
+const MIN_SESSIONS_FOR_PROFILE = 6;
+
+// Plain-English feature names + what they actually mean
+const FEATURE_META: { key: string; label: string; tip: string }[] = [
+  { key: 'mean_dwell_sfb',        label: 'Same-finger hold',   tip: 'How long you hold a key before pressing another key on the same finger (e.g. "ed" both use left middle finger)' },
+  { key: 'mean_flight_sfb',       label: 'Same-finger gap',    tip: 'Time between releasing one key and pressing the next when both use the same finger — these bigrams are inherently slow' },
+  { key: 'mean_flight_roll_in',   label: 'Inward roll',        tip: 'Typing two keys on the same hand moving toward the index finger — generally your fastest movement (e.g. typing "in")' },
+  { key: 'mean_flight_roll_out',  label: 'Outward roll',       tip: 'Typing two keys on the same hand moving toward the pinky — slightly slower than inward (e.g. typing "we")' },
+  { key: 'mean_flight_alternation', label: 'Hand switch',      tip: 'Time to move from a key on one hand to a key on the other — usually fast and natural' },
+  { key: 'mean_flight_scissor',   label: 'Row jump',           tip: 'Pressing keys that are two rows apart on adjacent fingers — mechanically awkward, tends to be slow' },
+  { key: 'mean_flight_lateral',   label: 'Pinky reach',        tip: 'Reaching to the outermost columns (Q, A, Z side or P, ; side) — awkward for most typists' },
+];
+
+// Average flight speed (ms) for each cluster, precomputed from centroids
+// = mean of the 6 non-SFB-dwell features
+const CLUSTER_AVG_SPEED: Record<number, number> = {
+  0: 260, 1: 80, 2: 60, 3: 151, 4: 347, 5: 187, 6: 231, 7: 120,
 };
+
+function avgSpeed(features: Record<string, number | null>): number | null {
+  const keys = [
+    'mean_flight_sfb', 'mean_flight_roll_in', 'mean_flight_roll_out',
+    'mean_flight_alternation', 'mean_flight_scissor', 'mean_flight_lateral',
+  ];
+  const vals = keys.map(k => features[k]).filter((v): v is number => v != null);
+  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
 
 export default function ResultsView({ sessionId }: { sessionId: string }) {
   const router = useRouter();
@@ -41,17 +59,16 @@ export default function ResultsView({ sessionId }: { sessionId: string }) {
     return (
       <div className="text-center space-y-4 py-16">
         <p className="text-red-400 text-sm">{error}</p>
-        <button onClick={() => router.push('/')} className="text-neutral-400 text-xs underline underline-offset-2 hover:text-neutral-100">
-          Try again
-        </button>
+        <button onClick={() => router.push('/')} className="text-neutral-400 text-xs underline underline-offset-2 hover:text-neutral-100">Try again</button>
       </div>
     );
   }
-
   if (!result) {
     return <div className="text-center py-16 text-neutral-500 text-sm">Loading your results…</div>;
   }
 
+  const n = result.n_sessions ?? 1;
+  const profileReady = n >= MIN_SESSIONS_FOR_PROFILE;
   const displayCluster = result.aggregated_cluster_idx ?? result.cluster_idx;
   const profile = displayCluster != null ? CLUSTER_PROFILES[displayCluster] : null;
   const centroid = displayCluster != null ? CLUSTER_CENTROIDS[displayCluster] : null;
@@ -67,128 +84,193 @@ export default function ResultsView({ sessionId }: { sessionId: string }) {
     features.mean_flight_lateral,
   ];
 
-  const sessionLabel = result.n_sessions <= 1
-    ? 'Session 1 — type more passages for a more stable result'
-    : `Based on ${result.n_sessions} sessions`;
+  const userSpeed = avgSpeed(features);
+
+  // Speed comparison number line: range 40–380ms
+  const SPEED_MIN = 40, SPEED_MAX = 380;
+  const toPct = (ms: number) => Math.max(0, Math.min(100, (ms - SPEED_MIN) / (SPEED_MAX - SPEED_MIN) * 100));
 
   return (
     <div className="space-y-8">
 
       {/* Cluster identity */}
-      <div className="space-y-1">
+      <div className="space-y-2">
         {profile ? (
           <>
             <div className="flex items-baseline gap-3">
               <h1 className="text-3xl font-bold tracking-tight">{profile.name}</h1>
-              <span className="text-sm text-neutral-500">rank {profile.speed_rank} of 8</span>
+              <span className="text-sm text-neutral-500">#{profile.speed_rank} of 8</span>
             </div>
             <p className="text-neutral-400 text-sm leading-relaxed max-w-lg">{profile.description}</p>
           </>
         ) : (
           <h1 className="text-2xl font-bold tracking-tight">Your Results</h1>
         )}
-        <p className="text-xs text-neutral-600 pt-1">{sessionLabel}</p>
+        <p className="text-xs text-neutral-600">
+          {profileReady
+            ? `Averaged over ${n} sessions`
+            : `Session ${n} of ${MIN_SESSIONS_FOR_PROFILE} — keep going for a stable profile`}
+        </p>
       </div>
 
-      {/* Speed spectrum */}
+      {/* Progress indicator or full profile */}
+      {!profileReady ? (
+        <div className="rounded-xl border border-neutral-700 bg-neutral-900 p-5 space-y-3">
+          <p className="text-sm text-neutral-300">
+            Your placement may shift until you have more data. Complete {MIN_SESSIONS_FOR_PROFILE - n} more {MIN_SESSIONS_FOR_PROFILE - n === 1 ? 'test' : 'tests'} to unlock your full profile.
+          </p>
+          <div className="flex gap-1">
+            {Array.from({ length: MIN_SESSIONS_FOR_PROFILE }, (_, i) => (
+              <div key={i} className={`h-1.5 flex-1 rounded-full ${i < n ? 'bg-neutral-300' : 'bg-neutral-700'}`} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        /* Speed spectrum — only shown once profile is stable */
+        <div className="space-y-2">
+          <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Speed ranking</p>
+          <div className="flex gap-1">
+            {SPEED_ORDER.map((idx) => {
+              const isUser = idx === displayCluster;
+              const p = CLUSTER_PROFILES[idx];
+              return (
+                <div
+                  key={idx}
+                  title={p.name}
+                  className={`flex-1 rounded py-1.5 text-center text-xs font-mono transition-colors ${
+                    isUser ? 'bg-neutral-100 text-neutral-900 font-semibold' : 'bg-neutral-800 text-neutral-500'
+                  }`}
+                >
+                  {isUser ? p.name.split(' ')[0] : ''}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex justify-between text-xs text-neutral-600">
+            <span>Fastest</span><span>Slowest</span>
+          </div>
+        </div>
+      )}
+
+      {/* Speed comparison number line — always shown */}
       <div className="space-y-2">
-        <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Speed spectrum</p>
-        <div className="flex gap-1">
-          {SPEED_ORDER.map((clusterIdx) => {
-            const isUser = clusterIdx === displayCluster;
-            const p = CLUSTER_PROFILES[clusterIdx];
+        <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">
+          Average transition speed
+        </p>
+        <div className="relative h-9">
+          {/* Track */}
+          <div className="absolute top-4 left-0 right-0 h-px bg-neutral-700" />
+
+          {/* Cluster dots */}
+          {SPEED_ORDER.map((idx) => {
+            const spd = CLUSTER_AVG_SPEED[idx];
+            const pct = toPct(spd);
+            const isUser = idx === displayCluster;
             return (
               <div
-                key={clusterIdx}
-                title={p.name}
-                className={`flex-1 rounded py-1.5 text-center text-xs font-mono transition-colors ${
-                  isUser
-                    ? 'bg-neutral-100 text-neutral-900 font-semibold'
-                    : 'bg-neutral-800 text-neutral-500'
+                key={idx}
+                className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full transition-all ${
+                  isUser ? 'w-3.5 h-3.5 bg-neutral-100 ring-2 ring-neutral-100/30' : 'w-2 h-2 bg-neutral-600'
                 }`}
-              >
-                {isUser ? p.name.split(' ')[0] : ''}
-              </div>
+                style={{ left: `${pct}%` }}
+                title={`${CLUSTER_PROFILES[idx].name}: ${spd}ms avg`}
+              />
             );
           })}
+
+          {/* User's actual measured speed */}
+          {userSpeed != null && (
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-amber-400/70"
+              style={{ left: `${toPct(userSpeed)}%` }}
+              title={`Your measured speed: ${Math.round(userSpeed)}ms`}
+            />
+          )}
         </div>
         <div className="flex justify-between text-xs text-neutral-600">
-          <span>Fastest</span>
-          <span>Slowest</span>
+          <span>Fast (40ms)</span>
+          {userSpeed != null && (
+            <span className="text-amber-400/80">
+              you: {Math.round(userSpeed)}ms
+            </span>
+          )}
+          <span>Slow (380ms)</span>
         </div>
+        <p className="text-xs text-neutral-700">
+          Dots = cluster averages. Amber line = your measured this session. Lower ms is faster.
+        </p>
       </div>
 
-      {/* Radar chart + insights */}
-      <div className="flex flex-col sm:flex-row gap-6 items-start">
-        {centroid && (
-          <div className="space-y-2 shrink-0">
-            <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Your profile</p>
-            <div className="flex gap-4 text-xs text-neutral-600">
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-5 border-t-2 border-neutral-300" /> you
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block w-5 border-t-2 border-dashed border-neutral-500" /> cluster avg
-              </span>
-            </div>
-            <RadarChart userValues={userRadarValues} centroidValues={centroid} />
+      {/* Radar chart — only after profile is stable */}
+      {profileReady && centroid && (
+        <div className="space-y-2">
+          <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Your feature profile</p>
+          <div className="flex gap-4 text-xs text-neutral-600 mb-1">
+            <span className="flex items-center gap-1"><span className="inline-block w-5 border-t-2 border-neutral-300" />you</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-5 border-t-2 border-dashed border-neutral-500" />cluster avg</span>
+          </div>
+          <p className="text-xs text-neutral-700">More area = relatively faster at that movement type</p>
+          <RadarChart userValues={userRadarValues} centroidValues={centroid} />
+        </div>
+      )}
+
+      {/* Insights */}
+      <div className="space-y-3">
+        {insights.headline ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-1">
+            <div className="text-xs font-medium text-amber-400 uppercase tracking-wider">Top finding</div>
+            <p className="text-neutral-100 text-sm leading-relaxed">{insights.headline.message}</p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-neutral-700 bg-neutral-900 p-4">
+            <p className="text-neutral-400 text-sm">Your typing looks typical for your cluster. No standout patterns this session.</p>
           </div>
         )}
 
-        <div className="flex-1 space-y-3 min-w-0">
-          {insights.headline ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-1">
-              <div className="text-xs font-medium text-amber-400 uppercase tracking-wider">Top finding</div>
-              <p className="text-neutral-100 text-sm leading-relaxed">{insights.headline.message}</p>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-neutral-700 bg-neutral-900 p-4">
-              <p className="text-neutral-400 text-sm">Your typing looks typical for your cluster. No standout patterns.</p>
-            </div>
-          )}
+        {insights.secondary.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Also notable</p>
+            {insights.secondary.map((ins, i) => (
+              <div key={i} className="rounded-lg border border-neutral-700 bg-neutral-900 p-3">
+                <p className="text-neutral-300 text-sm leading-relaxed">{ins.message}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
-          {insights.secondary.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Also notable</p>
-              {insights.secondary.map((ins, i) => (
-                <div key={i} className="rounded-lg border border-neutral-700 bg-neutral-900 p-3">
-                  <p className="text-neutral-300 text-sm leading-relaxed">{ins.message}</p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {insights.positives.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Strengths</p>
-              {insights.positives.map((ins, i) => (
-                <div key={i} className="rounded-lg border border-emerald-700/30 bg-emerald-900/10 p-3">
-                  <p className="text-neutral-300 text-sm leading-relaxed">{ins.message}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {insights.positives.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Strengths</p>
+            {insights.positives.map((ins, i) => (
+              <div key={i} className="rounded-lg border border-emerald-700/30 bg-emerald-900/10 p-3">
+                <p className="text-neutral-300 text-sm leading-relaxed">{ins.message}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Feature breakdown */}
+      {/* Feature breakdown with plain-English labels and tooltips */}
       <div className="space-y-2">
-        <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Feature breakdown (ms)</p>
+        <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">Breakdown (ms · lower = faster)</p>
         <div className="rounded-xl border border-neutral-800 divide-y divide-neutral-800">
-          {Object.entries(FEATURE_LABELS).map(([key, label]) => {
-            const val = features[key as keyof typeof features];
+          {FEATURE_META.map(({ key, label, tip }) => {
+            const val = features[key as keyof typeof features] as number | null;
             return (
-              <div key={key} className="flex justify-between items-center px-4 py-2.5">
-                <span className="text-sm text-neutral-400">{label}</span>
-                <span className="text-sm font-mono text-neutral-200">
-                  {val != null ? `${(val as number).toFixed(0)} ms` : '—'}
+              <div key={key} className="flex justify-between items-center px-4 py-2.5 group">
+                <div className="space-y-0.5">
+                  <span className="text-sm text-neutral-400">{label}</span>
+                  <p className="text-xs text-neutral-700 group-hover:text-neutral-500 transition-colors max-w-xs">{tip}</p>
+                </div>
+                <span className="text-sm font-mono text-neutral-200 shrink-0 ml-4">
+                  {val != null ? `${val.toFixed(0)} ms` : '—'}
                 </span>
               </div>
             );
           })}
         </div>
-        <p className="text-xs text-neutral-600">
-          {features.n_keystrokes} keystrokes · {features.n_bigrams_labeled} labeled bigrams · cluster #{displayCluster}
+        <p className="text-xs text-neutral-700">
+          {features.n_keystrokes} keystrokes · {features.n_bigrams_labeled} categorized pairs · cluster #{displayCluster}
         </p>
       </div>
 
