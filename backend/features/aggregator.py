@@ -48,7 +48,7 @@ class FeatureVector:
     n_bigrams_labeled: int
 
 
-_MIN_KEYSTROKES = 100
+_MIN_KEYSTROKES = 40
 _DWELL_CAP_MS = 500.0
 # Flight times above this are thinking pauses or inter-sentence gaps, not
 # biomechanical transitions. 1000ms cleanly separates normal typing (< 500ms)
