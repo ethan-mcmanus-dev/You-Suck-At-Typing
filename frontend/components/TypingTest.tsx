@@ -8,8 +8,9 @@ import { generatePassage } from '@/lib/words';
 
 const TEST_SECONDS = 60;
 const PASSAGE_WORDS = 400;
-// Padding inside the scroll container so the first/last characters can be centered
-const SCROLL_PADDING = 150;
+// Must match the lineHeight style on the text span below
+const LINE_HEIGHT_PX = 54;
+const VISIBLE_LINES = 2;
 
 type Status = 'idle' | 'typing' | 'done' | 'submitting' | 'error';
 
@@ -28,7 +29,7 @@ export default function TypingTest() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const warmedRef = useRef(false);
   const warmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const submitRef = useRef<(() => void) | null>(null);
 
   useEffect(() => { statusRef.current = status; }, [status]);
@@ -44,7 +45,7 @@ export default function TypingTest() {
         router.push(`/results/${result.session_id}`);
       })
       .catch(err => {
-        setError(err instanceof Error ? err.message : 'Something went wrong. Try again.');
+        setError(err instanceof Error ? err.message : 'Something went wrong.');
         setStatus('error');
       });
   };
@@ -120,17 +121,13 @@ export default function TypingTest() {
     if (warmIntervalRef.current) clearInterval(warmIntervalRef.current);
   }, []);
 
-  // Keep cursor line centered in the scroll container
+  // Slide text so the cursor line is always at the top of the visible window
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const cursor = el.querySelector('[data-cursor]') as HTMLElement | null;
+    const inner = innerRef.current;
+    if (!inner) return;
+    const cursor = inner.querySelector('[data-cursor]') as HTMLElement | null;
     if (!cursor) return;
-    const elRect = el.getBoundingClientRect();
-    const cursorRect = cursor.getBoundingClientRect();
-    // Position of cursor relative to the scroll content
-    const relTop = cursorRect.top - elRect.top + el.scrollTop;
-    el.scrollTo({ top: relTop - el.clientHeight / 2 + cursorRect.height / 2, behavior: 'smooth' });
+    inner.style.transform = `translateY(-${cursor.offsetTop}px)`;
   }, [typed]);
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -142,24 +139,17 @@ export default function TypingTest() {
   const pctTime = timeLeft / TEST_SECONDS;
 
   const chars = passage.split('').map((char, i) => {
-    const isCursor = i === typed.length;
-    if (isCursor) {
-      // Block cursor — highlights the character you're about to type
+    if (i < typed.length) {
       return (
-        <span
-          key={i}
-          data-cursor=""
-          className="bg-neutral-300 text-neutral-950 rounded-sm"
-        >
-          {char === ' ' ? ' ' : char}
+        <span key={i} className={typed[i] === char ? 'text-neutral-100' : 'text-red-400'}>
+          {char}
         </span>
       );
     }
-    let cls = 'text-neutral-600';
-    if (i < typed.length) {
-      cls = typed[i] === char ? 'text-neutral-200' : 'text-red-400';
+    if (i === typed.length) {
+      return <span key={i} data-cursor="" className="text-neutral-500">{char}</span>;
     }
-    return <span key={i} className={cls}>{char}</span>;
+    return <span key={i} className="text-neutral-500">{char}</span>;
   });
 
   return (
@@ -167,60 +157,68 @@ export default function TypingTest() {
       {/* Timer + WPM */}
       <div className="flex items-baseline justify-between">
         <span
-          className={`font-mono text-5xl font-bold tabular-nums ${
-            timeLeft <= 10 ? 'text-red-400' : 'text-neutral-300'
+          className={`font-mono text-xl tabular-nums ${
+            timeLeft <= 10 ? 'text-red-400' : 'text-neutral-500'
           }`}
         >
           {formatTime(timeLeft)}
         </span>
         {wpm != null && (
-          <span className="font-mono text-neutral-500">
-            <span className="text-3xl">{wpm}</span>
-            <span className="text-base ml-1.5">wpm</span>
+          <span className="font-mono text-neutral-600">
+            <span className="text-lg">{wpm}</span>
+            <span className="text-sm ml-1">wpm</span>
           </span>
         )}
       </div>
 
-      {/* Passage — large text, scrolls to keep cursor centered */}
+      {/* Text window — fixed 2-line height, no scrolling */}
       <div
-        ref={containerRef}
-        className="overflow-y-scroll rounded-2xl bg-neutral-900 select-none [&::-webkit-scrollbar]:hidden"
-        style={{ height: '300px', scrollbarWidth: 'none' }}
+        style={{ height: `${LINE_HEIGHT_PX * VISIBLE_LINES}px`, overflow: 'hidden' }}
+        className="w-full select-none"
       >
         <div
-          className="px-8 whitespace-pre-wrap"
-          style={{ paddingTop: `${SCROLL_PADDING}px`, paddingBottom: `${SCROLL_PADDING}px` }}
+          ref={innerRef}
+          style={{ transition: 'transform 100ms ease-out', position: 'relative' }}
         >
-          <span className="font-mono text-2xl leading-[3.25rem] break-words">
+          <span
+            className="font-mono text-2xl whitespace-pre-wrap break-words"
+            style={{ lineHeight: `${LINE_HEIGHT_PX}px` }}
+          >
             {chars}
           </span>
         </div>
       </div>
 
-      {/* Error */}
-      {status === 'error' && (
-        <p className="text-red-400 text-sm text-center">{error}</p>
-      )}
-
-      {/* Idle hint */}
-      {status === 'idle' && (
-        <p className="text-xs text-neutral-700 text-center tracking-wide">
-          just start typing — 60 second test
-        </p>
-      )}
-
-      {/* Submitting hint */}
-      {status === 'submitting' && (
-        <p className="text-xs text-neutral-600 text-center">Analyzing your keystrokes…</p>
-      )}
-
       {/* Time bar */}
-      <div className="h-1 rounded-full bg-neutral-800 overflow-hidden">
+      <div className="h-px w-full bg-neutral-800 overflow-hidden">
         <div
-          className={`h-full transition-all duration-1000 ${timeLeft <= 10 ? 'bg-red-500' : 'bg-neutral-500'}`}
+          className={`h-full transition-all duration-1000 ${timeLeft <= 10 ? 'bg-red-500' : 'bg-neutral-600'}`}
           style={{ width: `${pctTime * 100}%` }}
         />
       </div>
+
+      {/* Idle hint */}
+      {status === 'idle' && (
+        <p className="text-xs text-neutral-700 text-center tracking-wide">start typing to begin</p>
+      )}
+
+      {/* Submitting */}
+      {status === 'submitting' && (
+        <p className="text-xs text-neutral-600 text-center">analyzing…</p>
+      )}
+
+      {/* Error + retry */}
+      {status === 'error' && (
+        <div className="flex items-center justify-between">
+          <p className="text-red-400 text-sm">{error}</p>
+          <button
+            onClick={() => submitRef.current?.()}
+            className="text-sm text-neutral-400 hover:text-neutral-100 underline underline-offset-2 transition-colors"
+          >
+            retry
+          </button>
+        </div>
+      )}
     </div>
   );
 }
