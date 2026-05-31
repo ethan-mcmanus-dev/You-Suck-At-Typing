@@ -7,8 +7,9 @@ import { submitSession, warmServer, KeystrokeEvent } from '@/lib/api';
 import { generatePassage } from '@/lib/words';
 
 const TEST_SECONDS = 60;
-// ~400 words — well above what anyone types in 60s
 const PASSAGE_WORDS = 400;
+// Padding inside the scroll container so the first/last characters can be centered
+const SCROLL_PADDING = 150;
 
 type Status = 'idle' | 'typing' | 'done' | 'submitting' | 'error';
 
@@ -20,7 +21,6 @@ export default function TypingTest() {
   const [error, setError] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(TEST_SECONDS);
 
-  // Mutable refs shared with event handlers — avoids stale-closure issues
   const eventsRef = useRef<KeystrokeEvent[]>([]);
   const keydownsRef = useRef<Map<string, number>>(new Map());
   const typedRef = useRef('');
@@ -28,10 +28,9 @@ export default function TypingTest() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const warmedRef = useRef(false);
   const warmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const passageRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const submitRef = useRef<(() => void) | null>(null);
 
-  // Keep statusRef in sync
   useEffect(() => { statusRef.current = status; }, [status]);
 
   const submit = () => {
@@ -50,7 +49,6 @@ export default function TypingTest() {
       });
   };
 
-  // Keep submitRef pointing at the latest submit
   submitRef.current = submit;
 
   const startTimer = () => {
@@ -68,13 +66,10 @@ export default function TypingTest() {
     }, 1000);
   };
 
-  // Global keyboard capture
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Ignore modifier combos
       if (e.ctrlKey || e.altKey || e.metaKey) return;
 
-      // Pre-warm Render on first keypress
       if (!warmedRef.current) {
         warmedRef.current = true;
         warmServer();
@@ -120,79 +115,109 @@ export default function TypingTest() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [passage]);
 
-  // Cleanup intervals on unmount
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (warmIntervalRef.current) clearInterval(warmIntervalRef.current);
   }, []);
 
-  // Scroll passage to keep cursor visible
+  // Keep cursor line centered in the scroll container
   useEffect(() => {
-    if (!passageRef.current) return;
-    const cursor = passageRef.current.querySelector('[data-cursor]');
-    cursor?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const el = containerRef.current;
+    if (!el) return;
+    const cursor = el.querySelector('[data-cursor]') as HTMLElement | null;
+    if (!cursor) return;
+    const elRect = el.getBoundingClientRect();
+    const cursorRect = cursor.getBoundingClientRect();
+    // Position of cursor relative to the scroll content
+    const relTop = cursorRect.top - elRect.top + el.scrollTop;
+    el.scrollTo({ top: relTop - el.clientHeight / 2 + cursorRect.height / 2, behavior: 'smooth' });
   }, [typed]);
 
-  const formatTime = (s: number) =>
-    `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   const wpm = typed.length > 0 && timeLeft < TEST_SECONDS
     ? Math.round((typed.length / 5) / ((TEST_SECONDS - timeLeft) / 60))
     : null;
 
-  // Render passage with character coloring
+  const pctTime = timeLeft / TEST_SECONDS;
+
   const chars = passage.split('').map((char, i) => {
     const isCursor = i === typed.length;
-    let cls = 'text-neutral-600';
-    if (i < typed.length) {
-      cls = typed[i] === char ? 'text-neutral-100' : 'text-red-400';
-    }
     if (isCursor) {
+      // Block cursor — highlights the character you're about to type
       return (
-        <span key={i} className={cls} data-cursor="">
-          <span className="border-l-2 border-neutral-200 animate-[blink_1s_step-end_infinite]" />
-          {char}
+        <span
+          key={i}
+          data-cursor=""
+          className="bg-neutral-300 text-neutral-950 rounded-sm"
+        >
+          {char === ' ' ? ' ' : char}
         </span>
       );
+    }
+    let cls = 'text-neutral-600';
+    if (i < typed.length) {
+      cls = typed[i] === char ? 'text-neutral-200' : 'text-red-400';
     }
     return <span key={i} className={cls}>{char}</span>;
   });
 
-  const pctTime = timeLeft / TEST_SECONDS;
-
   return (
-    <div className="space-y-4" onClick={() => window.focus()}>
+    <div className="space-y-5">
       {/* Timer + WPM */}
       <div className="flex items-baseline justify-between">
-        <span className={`font-mono text-3xl font-bold tabular-nums ${timeLeft <= 10 ? 'text-red-400' : 'text-neutral-200'}`}>
+        <span
+          className={`font-mono text-5xl font-bold tabular-nums ${
+            timeLeft <= 10 ? 'text-red-400' : 'text-neutral-300'
+          }`}
+        >
           {formatTime(timeLeft)}
         </span>
         {wpm != null && (
-          <span className="font-mono text-sm text-neutral-500">{wpm} wpm</span>
+          <span className="font-mono text-neutral-500">
+            <span className="text-3xl">{wpm}</span>
+            <span className="text-base ml-1.5">wpm</span>
+          </span>
         )}
       </div>
 
-      {/* Passage display — fixed height, scrolls internally */}
+      {/* Passage — large text, scrolls to keep cursor centered */}
       <div
-        ref={passageRef}
-        className="font-mono text-base leading-loose rounded-lg bg-neutral-900 p-4 h-32 overflow-y-hidden select-none"
-        style={{ scrollBehavior: 'smooth' }}
+        ref={containerRef}
+        className="overflow-y-scroll rounded-2xl bg-neutral-900 select-none [&::-webkit-scrollbar]:hidden"
+        style={{ height: '300px', scrollbarWidth: 'none' }}
       >
-        {chars}
+        <div
+          className="px-8 whitespace-pre-wrap"
+          style={{ paddingTop: `${SCROLL_PADDING}px`, paddingBottom: `${SCROLL_PADDING}px` }}
+        >
+          <span className="font-mono text-2xl leading-[3.25rem] break-words">
+            {chars}
+          </span>
+        </div>
       </div>
 
-      {/* Status line */}
-      <div className="text-xs text-neutral-600 h-4">
-        {status === 'idle' && 'Start typing to begin — test runs for 60 seconds'}
-        {status === 'typing' && `${typed.length} chars`}
-        {status === 'submitting' && 'Analyzing your keystrokes…'}
-        {status === 'error' && <span className="text-red-400">{error}</span>}
-      </div>
+      {/* Error */}
+      {status === 'error' && (
+        <p className="text-red-400 text-sm text-center">{error}</p>
+      )}
+
+      {/* Idle hint */}
+      {status === 'idle' && (
+        <p className="text-xs text-neutral-700 text-center tracking-wide">
+          just start typing — 60 second test
+        </p>
+      )}
+
+      {/* Submitting hint */}
+      {status === 'submitting' && (
+        <p className="text-xs text-neutral-600 text-center">Analyzing your keystrokes…</p>
+      )}
 
       {/* Time bar */}
       <div className="h-1 rounded-full bg-neutral-800 overflow-hidden">
         <div
-          className={`h-full transition-all duration-1000 ${timeLeft <= 10 ? 'bg-red-500' : 'bg-neutral-400'}`}
+          className={`h-full transition-all duration-1000 ${timeLeft <= 10 ? 'bg-red-500' : 'bg-neutral-500'}`}
           style={{ width: `${pctTime * 100}%` }}
         />
       </div>
