@@ -147,7 +147,11 @@ export default function TypingTest() {
       );
     }
     if (i === typed.length) {
-      return <span key={i} data-cursor="" className="text-neutral-500">{char}</span>;
+      return (
+        <span key={i} data-cursor="" className="text-neutral-500 border-l-2 border-neutral-400 cursor-blink">
+          {char}
+        </span>
+      );
     }
     return <span key={i} className="text-neutral-500">{char}</span>;
   });
