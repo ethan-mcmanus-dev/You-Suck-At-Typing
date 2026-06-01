@@ -25,39 +25,46 @@ const FEATURE_KEYS = [
 
 type FeatureKey = typeof FEATURE_KEYS[number];
 
-const FEATURE_META: Record<FeatureKey, { label: string; tip: string; words: string[] }> = {
+const FEATURE_META: Record<FeatureKey, { label: string; what: string; tip: string; words: string[] }> = {
   mean_dwell_sfb: {
     label: 'Same-finger hold',
+    what: 'A same-finger bigram (SFB) is when two consecutive keys are typed by the same finger — on QWERTY, "e" and "d" both use the left middle finger. This measures how long you hold the first key before releasing it.',
     tip: 'Release each key immediately — holding it down while preparing for the next same-finger key creates tension. Stay relaxed.',
     words: ['under', 'desk', 'link', 'swim', 'loin', 'kind'],
   },
   mean_flight_sfb: {
     label: 'Same-finger transitions',
-    tip: 'Consecutive keys on the same finger are the hardest bigrams on QWERTY. Drill these patterns slowly until the motor path feels automatic, then build speed.',
+    what: 'Two consecutive keys pressed by the same finger. The finger can\'t start moving to the second key until it\'s finished with the first, making these the slowest bigrams on the keyboard.',
+    tip: 'Drill these specific patterns slowly until the motor path feels automatic, then build speed. There\'s no trick here — it just takes repetition.',
     words: ['under', 'edge', 'swam', 'lore', 'loin', 'kindle'],
   },
   mean_flight_roll_in: {
     label: 'Inward rolls',
-    tip: 'Inward rolls (toward your index finger) should be your fastest motion. If they\'re slow, keep your wrists flat and avoid lifting fingers between the two keys.',
+    what: 'Both keys are on the same hand, and the second key is closer to your index finger than the first (moving inward). Example: "s" then "d" on the left hand. The natural curl of your fingers makes this the fastest type of hand movement.',
+    tip: 'If inward rolls are slow, you may be lifting your wrist between keys. Keep your hands flat and let your fingers do the movement — don\'t pick up the whole hand.',
     words: ['last', 'fast', 'rest', 'best', 'test', 'desk'],
   },
   mean_flight_roll_out: {
     label: 'Outward rolls',
-    tip: 'Outward rolls are slightly less natural. Keep the hand stable and let the finger extend outward — don\'t rotate your wrist to help it.',
+    what: 'Both keys on the same hand, but the second key is closer to your pinky (moving outward). Example: "d" then "s". Going outward is less natural than inward since your fingers prefer to curl inward.',
+    tip: 'Keep the hand stable and let the finger extend outward — don\'t rotate your wrist to compensate. Practice staying relaxed on the outward extension.',
     words: ['west', 'few', 'our', 'out', 'dew', 'sew'],
   },
   mean_flight_alternation: {
     label: 'Hand alternation',
+    what: 'One key typed with the left hand, the next with the right (or vice versa). Because both hands can prepare simultaneously, alternation is typically your fastest transition type.',
     tip: 'Alternating hands should feel effortless. Keep both hands hovering and ready — don\'t let one hand rest while the other works.',
     words: ['right', 'world', 'their', 'about', 'those', 'while'],
   },
   mean_flight_scissor: {
     label: 'Row jumps',
-    tip: 'Two-row jumps on adjacent fingers are mechanically awkward. Minimize wrist movement and reach with just the finger. Building this motor pattern slowly is key — speed comes later.',
+    what: 'Two adjacent fingers pressing keys that are two rows apart — like your index on the bottom row ("b") immediately followed by your middle on the top row ("r"). The fingers cross in a "scissor" motion, which is mechanically awkward.',
+    tip: 'Minimize wrist movement and reach with just the finger. Build this motor pattern slowly — going fast with bad form locks in bad habits.',
     words: ['branch', 'number', 'brown', 'verb', 'urban', 'bring'],
   },
   mean_flight_lateral: {
     label: 'Pinky reach',
+    what: 'Any key in the outermost columns: Q, A, Z on the left or P, ; on the right. These require the pinky to stretch significantly outward from its home position on A or ;.',
     tip: 'Keep your wrist anchored and extend the pinky only, then return immediately to home row. Avoid letting your whole hand drift toward the outer column.',
     words: ['please', 'people', 'place', 'apple', 'always', 'polar'],
   },
@@ -71,7 +78,7 @@ function getWeaknesses(features: Record<string, number | null>, centroid: number
       const delta = val - centroid[idx]; // positive = user is slower than centroid
       return { key, val, centroidVal: centroid[idx], delta };
     })
-    .filter((x): x is NonNullable<typeof x> => x !== null && x.delta > 20)
+    .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => b.delta - a.delta)
     .slice(0, 2);
 }
@@ -199,21 +206,27 @@ export default function ResultsView({ sessionId }: { sessionId: string }) {
       )}
 
       {/* What to practice */}
-      {weaknesses.length > 0 && (
+      {centroid && (
         <div className="space-y-3">
           <p className="text-xs text-neutral-500 uppercase tracking-wider font-medium">What to practice</p>
-          {weaknesses.map(({ key, val, centroidVal }) => {
+          {weaknesses.map(({ key, val, centroidVal, delta }) => {
             const meta = FEATURE_META[key];
+            const isBehind = delta > 10;
             return (
-              <div key={key} className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 space-y-2">
+              <div key={key} className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-neutral-200">{meta.label}</span>
-                  <span className="text-xs font-mono text-neutral-500">
+                  <span className={`text-xs font-mono ${isBehind ? 'text-red-400/70' : 'text-emerald-400/70'}`}>
                     you {Math.round(val)}ms · avg {Math.round(centroidVal)}ms
                   </span>
                 </div>
-                <p className="text-xs text-neutral-500 leading-relaxed">{meta.tip}</p>
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                {/* What it is */}
+                <p className="text-xs text-neutral-600 leading-relaxed border-l-2 border-neutral-700 pl-3">
+                  {meta.what}
+                </p>
+                {/* Advice */}
+                <p className="text-xs text-neutral-400 leading-relaxed">{meta.tip}</p>
+                <div className="flex flex-wrap gap-1.5">
                   {meta.words.map(w => (
                     <span key={w} className="font-mono text-xs bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded">
                       {w}
